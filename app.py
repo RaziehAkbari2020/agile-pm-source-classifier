@@ -7,6 +7,7 @@ from typing import Literal
 import pandas as pd
 import streamlit as st
 import trafilatura
+import plotly.express as px
 from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel
@@ -128,57 +129,40 @@ class ClassificationResult(BaseModel):
 
     subcategories: list[
         Literal[
-            # User Story Management
             "refinement",
             "quality improvement",
             "prioritization of user stories",
-
-            # Backlog Management
             "backlog grooming",
             "backlog organization",
             "backlog prioritization",
-
-            # Estimation
             "user story estimation",
             "story point estimation",
             "effort estimation",
             "task effort/time estimation",
             "complexity estimation",
-
-            # Task Management
             "task decomposition",
             "task planning",
             "task scheduling",
             "task prioritization",
-
-            # Dependency & Resource Management
             "dependency detection",
             "blocker identification",
             "assignee allocation",
             "resource allocation",
             "role allocation",
             "capability matching",
-
-            # Sprint & Project Monitoring
             "sprint planning",
             "progress tracking",
             "issue tracking",
             "status reporting",
-
-            # Agile Collaboration Support
             "meeting assistance",
             "scrum support",
             "daily scrum",
             "retrospective support",
             "collaboration assistance",
-
-            # Decision Support & Risk Management
             "risk prediction",
             "recommendations",
             "quality support",
             "managerial or technical decision support",
-
-            # Other
             "not clearly classifiable",
             "insufficient information",
             "outside Agile software project management",
@@ -378,6 +362,99 @@ def dataframe_to_excel_bytes(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 
+def build_main_category_chart(result_df: pd.DataFrame):
+    category_counts = (
+        result_df["predicted_category"]
+        .value_counts()
+        .reset_index()
+    )
+    category_counts.columns = ["Main Category", "Count"]
+
+    fig = px.bar(
+        category_counts,
+        x="Main Category",
+        y="Count",
+        title="Distribution of Main Categories",
+        text="Count",
+    )
+
+    fig.update_traces(textposition="outside")
+
+    fig.update_layout(
+        xaxis_title="Main Category",
+        yaxis_title="Number of Sources",
+        xaxis_tickangle=-30,
+        height=520,
+        showlegend=False,
+    )
+
+    return fig
+
+
+def build_subcategory_chart(result_df: pd.DataFrame, top_n: int = 20):
+    subcategory_series = (
+        result_df["predicted_subcategories"]
+        .fillna("")
+        .astype(str)
+        .str.split(",")
+        .explode()
+        .str.strip()
+    )
+
+    subcategory_series = subcategory_series[subcategory_series != ""]
+
+    subcategory_counts = (
+        subcategory_series
+        .value_counts()
+        .head(top_n)
+        .reset_index()
+    )
+
+    subcategory_counts.columns = ["Subcategory", "Count"]
+
+    fig = px.bar(
+        subcategory_counts,
+        x="Subcategory",
+        y="Count",
+        title=f"Top {top_n} Subcategories",
+        text="Count",
+    )
+
+    fig.update_traces(textposition="outside")
+
+    fig.update_layout(
+        xaxis_title="Subcategory",
+        yaxis_title="Number of Mentions",
+        xaxis_tickangle=-45,
+        height=620,
+        showlegend=False,
+    )
+
+    return fig
+
+
+def build_confidence_chart(result_df: pd.DataFrame):
+    confidence_counts = (
+        result_df["confidence"]
+        .value_counts()
+        .reset_index()
+    )
+
+    confidence_counts.columns = ["Confidence", "Count"]
+
+    fig = px.pie(
+        confidence_counts,
+        names="Confidence",
+        values="Count",
+        title="Confidence Distribution",
+        hole=0.4,
+    )
+
+    fig.update_layout(height=450)
+
+    return fig
+
+
 # -----------------------------
 # Input mode
 # -----------------------------
@@ -574,6 +651,27 @@ elif mode == "Batch: Excel/CSV":
             st.subheader("Results")
             st.dataframe(result_df)
 
+            # -----------------------------
+            # Charts
+            # -----------------------------
+            st.subheader("Visual Summary")
+
+            col_chart_1, col_chart_2 = st.columns([2, 1])
+
+            with col_chart_1:
+                main_category_fig = build_main_category_chart(result_df)
+                st.plotly_chart(main_category_fig, use_container_width=True)
+
+            with col_chart_2:
+                confidence_fig = build_confidence_chart(result_df)
+                st.plotly_chart(confidence_fig, use_container_width=True)
+
+            subcategory_fig = build_subcategory_chart(result_df, top_n=20)
+            st.plotly_chart(subcategory_fig, use_container_width=True)
+
+            # -----------------------------
+            # Download buttons
+            # -----------------------------
             csv = result_df.to_csv(index=False).encode("utf-8")
             excel_bytes = dataframe_to_excel_bytes(result_df)
 
