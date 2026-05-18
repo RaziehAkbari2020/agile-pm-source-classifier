@@ -7,3 +7,4 @@ trafilatura
 openpyxl
 requests
 beautifulsoup4
+plotly
