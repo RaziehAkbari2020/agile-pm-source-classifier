@@ -5,3 +5,5 @@ pydantic
 python-dotenv
 trafilatura
 openpyxl
+requests
+beautifulsoup4
