@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 
 import os
+from io import BytesIO
+from typing import Literal
+
 import pandas as pd
 import streamlit as st
 import trafilatura
 from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel
-from typing import Literal
 
 
 # -----------------------------
@@ -35,9 +37,9 @@ client = OpenAI(api_key=api_key)
 
 
 # -----------------------------
-# Categories
+# Categories and subcategories
 # -----------------------------
-CATEGORIES = [
+MAIN_CATEGORIES = [
     "User Story Management",
     "Backlog Management",
     "Estimation",
@@ -62,7 +64,64 @@ class ClassificationResult(BaseModel):
         "Decision Support & Risk Management",
         "Other / To be classified later",
     ]
-    subcategory: str
+
+    subcategories: list[Literal[
+        # User Story Management
+        "refinement",
+        "quality improvement",
+        "prioritization of user stories",
+
+        # Backlog Management
+        "backlog grooming",
+        "backlog organization",
+        "backlog prioritization",
+
+        # Estimation
+        "user story estimation",
+        "story point estimation",
+        "effort estimation",
+        "task effort/time estimation",
+        "complexity estimation",
+
+        # Task Management
+        "task decomposition",
+        "task planning",
+        "task scheduling",
+        "task prioritization",
+
+        # Dependency & Resource Management
+        "dependency detection",
+        "blocker identification",
+        "assignee allocation",
+        "resource allocation",
+        "role allocation",
+        "capability matching",
+
+        # Sprint & Project Monitoring
+        "sprint planning",
+        "progress tracking",
+        "issue tracking",
+        "status reporting",
+
+        # Agile Collaboration Support
+        "meeting assistance",
+        "scrum support",
+        "daily scrum",
+        "retrospective support",
+        "collaboration assistance",
+
+        # Decision Support & Risk Management
+        "risk prediction",
+        "recommendations",
+        "quality support",
+        "managerial or technical decision support",
+
+        # Other
+        "not clearly classifiable",
+        "insufficient information",
+        "outside Agile software project management",
+    ]]
+
     confidence: Literal["High", "Medium", "Low"]
     reason: str
     evidence: str
@@ -72,48 +131,92 @@ SYSTEM_PROMPT = """
 You are an expert reviewer conducting a multivocal literature review on
 LLM-based multi-agent systems for Agile Project Management.
 
-Your task is to classify each source into exactly one category.
+Your task is to classify each source into exactly one main category and one or more predefined subcategories.
 
-Use the following taxonomy:
+Use only the taxonomy below.
 
-1. User Story Management:
-   refinement, quality improvement, prioritization of user stories.
+Taxonomy:
 
-2. Backlog Management:
-   backlog grooming, backlog organization, backlog prioritization.
+1. Main Category: User Story Management
+   Allowed subcategories:
+   - refinement
+   - quality improvement
+   - prioritization of user stories
 
-3. Estimation:
-   user story estimation, story point estimation, effort estimation,
-   task effort/time estimation, complexity estimation.
+2. Main Category: Backlog Management
+   Allowed subcategories:
+   - backlog grooming
+   - backlog organization
+   - backlog prioritization
 
-4. Task Management:
-   task decomposition, task planning, task scheduling, task prioritization.
+3. Main Category: Estimation
+   Allowed subcategories:
+   - user story estimation
+   - story point estimation
+   - effort estimation
+   - task effort/time estimation
+   - complexity estimation
 
-5. Dependency & Resource Management:
-   dependency detection, blocker identification, assignee allocation,
-   resource allocation, role allocation, capability matching.
+4. Main Category: Task Management
+   Allowed subcategories:
+   - task decomposition
+   - task planning
+   - task scheduling
+   - task prioritization
 
-6. Sprint & Project Monitoring:
-   sprint planning, progress tracking, issue tracking, status reporting.
+5. Main Category: Dependency & Resource Management
+   Allowed subcategories:
+   - dependency detection
+   - blocker identification
+   - assignee allocation
+   - resource allocation
+   - role allocation
+   - capability matching
 
-7. Agile Collaboration Support:
-   meeting assistance, scrum support, daily scrum, retrospective support,
-   collaboration assistance.
+6. Main Category: Sprint & Project Monitoring
+   Allowed subcategories:
+   - sprint planning
+   - progress tracking
+   - issue tracking
+   - status reporting
 
-8. Decision Support & Risk Management:
-   risk prediction, recommendations, quality support, managerial or technical decision support.
+7. Main Category: Agile Collaboration Support
+   Allowed subcategories:
+   - meeting assistance
+   - scrum support
+   - daily scrum
+   - retrospective support
+   - collaboration assistance
 
-9. Other / To be classified later:
-   use only if the source does not clearly fit any of the above categories.
+8. Main Category: Decision Support & Risk Management
+   Allowed subcategories:
+   - risk prediction
+   - recommendations
+   - quality support
+   - managerial or technical decision support
+
+9. Main Category: Other / To be classified later
+   Allowed subcategories:
+   - not clearly classifiable
+   - insufficient information
+   - outside Agile software project management
 
 Important rules:
-- Choose only one main category.
+- Choose exactly one main category.
+- Choose one or more subcategories.
+- All selected subcategories must belong to the selected main category.
+- Do not create new main category names.
+- Do not create new subcategory names.
+- If the source covers multiple subtopics within the same main category, include all relevant subcategories.
+- If the source covers multiple main categories, choose the most central or dominant main category, and select only subcategories from that main category.
 - Do not classify general project management unless it is clearly related to Agile software project management.
-- If the source is about user story generation only, classify it as User Story Management only if it also includes refinement, prioritization, or quality improvement.
+- If the source is only about user story generation, classify it as User Story Management only if it also includes refinement, quality improvement, or prioritization of user stories.
 - If the source is about breaking user stories or requirements into executable tasks, classify it as Task Management.
 - If the source is mainly about story points, effort, time, or complexity, classify it as Estimation.
-- If uncertain, use "Other / To be classified later" and explain why.
-- Keep the reason short and evidence directly grounded in the text.
+- If the source is too broad but still clearly related to Agile software project management, choose the dominant category.
+- If the source does not clearly fit any category, use Other / To be classified later.
+- Keep the reason short.
+- Evidence must be a short phrase or sentence grounded in the provided source text.
 """
 
 
@@ -161,10 +264,28 @@ def extract_text_from_url(url: str) -> str:
 def display_result(result: ClassificationResult):
     st.subheader("Classification Result")
     st.write("**Category:**", result.category)
-    st.write("**Subcategory:**", result.subcategory)
+    st.write("**Subcategories:**", ", ".join(result.subcategories))
     st.write("**Confidence:**", result.confidence)
     st.write("**Reason:**", result.reason)
     st.write("**Evidence:**", result.evidence)
+
+
+def dataframe_to_excel_bytes(df: pd.DataFrame) -> bytes:
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="classification_results")
+
+    return output.getvalue()
+
+
+def clean_cell(value) -> str:
+    value = str(value).strip()
+
+    if value.lower() == "nan":
+        return ""
+
+    return value
 
 
 # -----------------------------
@@ -249,7 +370,7 @@ elif mode == "Batch: Excel/CSV":
 
         st.info(
             "Recommended columns: source_id, source_type, title, abstract, url. "
-            "For papers, use title + abstract. For grey literature, use url or paste text in abstract."
+            "For papers, use title + abstract. For grey literature, use abstract if you prepared a reliable manual summary; otherwise use url."
         )
 
         if st.button("Classify all rows"):
@@ -258,38 +379,28 @@ elif mode == "Batch: Excel/CSV":
             progress_bar = st.progress(0)
             total_rows = len(df)
 
-            for index, row in df.iterrows():
-                source_id = str(row.get("source_id", "")).strip()
-                source_type = str(row.get("source_type", "")).strip()
-                title = str(row.get("title", "")).strip()
-                abstract = str(row.get("abstract", "")).strip()
-                url = str(row.get("url", "")).strip()
+            for row_number, (_, row) in enumerate(df.iterrows(), start=1):
+                source_id = clean_cell(row.get("source_id", ""))
+                source_type = clean_cell(row.get("source_type", ""))
+                title = clean_cell(row.get("title", ""))
+                abstract = clean_cell(row.get("abstract", ""))
+                url = clean_cell(row.get("url", ""))
 
-                # Handle nan strings
-                if source_id.lower() == "nan":
-                    source_id = ""
-                if source_type.lower() == "nan":
-                    source_type = ""
-                if title.lower() == "nan":
-                    title = ""
-                if abstract.lower() == "nan":
-                    abstract = ""
-                if url.lower() == "nan":
-                    url = ""
-
-                # Decide text source
-                if url:
-                    text = extract_text_from_url(url)
-
-                    # Fallback: if URL extraction fails, use abstract/text column
-                    if not text and abstract:
-                        text = abstract
-
-                    source_title = title if title else url
-
-                else:
+                # Important logic:
+                # If abstract exists, use it first.
+                # If abstract is empty and url exists, extract from url.
+                if abstract:
                     text = abstract
-                    source_title = title if title else source_id
+                    source_title = title if title else source_id if source_id else "Untitled source"
+                    text_source_used = "abstract"
+                elif url:
+                    text = extract_text_from_url(url)
+                    source_title = title if title else url
+                    text_source_used = "url"
+                else:
+                    text = ""
+                    source_title = title if title else source_id if source_id else "Untitled source"
+                    text_source_used = "none"
 
                 if not text:
                     results.append({
@@ -297,8 +408,9 @@ elif mode == "Batch: Excel/CSV":
                         "source_type": source_type,
                         "title": title,
                         "url": url,
+                        "text_source_used": text_source_used,
                         "predicted_category": "Other / To be classified later",
-                        "predicted_subcategory": "",
+                        "predicted_subcategories": "insufficient information",
                         "confidence": "Low",
                         "reason": "No usable text was available.",
                         "evidence": "",
@@ -306,7 +418,7 @@ elif mode == "Batch: Excel/CSV":
                         "notes": "",
                     })
 
-                    progress_bar.progress((index + 1) / total_rows)
+                    progress_bar.progress(row_number / total_rows)
                     continue
 
                 try:
@@ -317,8 +429,9 @@ elif mode == "Batch: Excel/CSV":
                         "source_type": source_type,
                         "title": title,
                         "url": url,
+                        "text_source_used": text_source_used,
                         "predicted_category": result.category,
-                        "predicted_subcategory": result.subcategory,
+                        "predicted_subcategories": ", ".join(result.subcategories),
                         "confidence": result.confidence,
                         "reason": result.reason,
                         "evidence": result.evidence,
@@ -332,8 +445,9 @@ elif mode == "Batch: Excel/CSV":
                         "source_type": source_type,
                         "title": title,
                         "url": url,
+                        "text_source_used": text_source_used,
                         "predicted_category": "Other / To be classified later",
-                        "predicted_subcategory": "",
+                        "predicted_subcategories": "insufficient information",
                         "confidence": "Low",
                         "reason": f"Classification failed: {e}",
                         "evidence": "",
@@ -341,7 +455,7 @@ elif mode == "Batch: Excel/CSV":
                         "notes": "",
                     })
 
-                progress_bar.progress((index + 1) / total_rows)
+                progress_bar.progress(row_number / total_rows)
 
             result_df = pd.DataFrame(results)
 
@@ -349,10 +463,22 @@ elif mode == "Batch: Excel/CSV":
             st.dataframe(result_df)
 
             csv = result_df.to_csv(index=False).encode("utf-8")
+            excel_bytes = dataframe_to_excel_bytes(result_df)
 
-            st.download_button(
-                "Download results as CSV",
-                data=csv,
-                file_name="agile_pm_classification_results.csv",
-                mime="text/csv",
-            )
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.download_button(
+                    "Download results as CSV",
+                    data=csv,
+                    file_name="agile_pm_classification_results.csv",
+                    mime="text/csv",
+                )
+
+            with col2:
+                st.download_button(
+                    "Download results as Excel",
+                    data=excel_bytes,
+                    file_name="agile_pm_classification_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
