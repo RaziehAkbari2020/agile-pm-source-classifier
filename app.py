@@ -30,7 +30,9 @@ load_dotenv()
 api_key = st.secrets.get("OPENAI_API_KEY", None) or os.getenv("OPENAI_API_KEY")
 
 if not api_key:
-    st.error("OPENAI_API_KEY is missing. Please add it to Streamlit Secrets or your local .env file.")
+    st.error(
+        "OPENAI_API_KEY is missing. Please add it to Streamlit Secrets or your local .env file."
+    )
     st.stop()
 
 client = OpenAI(api_key=api_key)
@@ -52,6 +54,65 @@ MAIN_CATEGORIES = [
 ]
 
 
+ALLOWED_SUBCATEGORIES_BY_CATEGORY = {
+    "User Story Management": [
+        "refinement",
+        "quality improvement",
+        "prioritization of user stories",
+    ],
+    "Backlog Management": [
+        "backlog grooming",
+        "backlog organization",
+        "backlog prioritization",
+    ],
+    "Estimation": [
+        "user story estimation",
+        "story point estimation",
+        "effort estimation",
+        "task effort/time estimation",
+        "complexity estimation",
+    ],
+    "Task Management": [
+        "task decomposition",
+        "task planning",
+        "task scheduling",
+        "task prioritization",
+    ],
+    "Dependency & Resource Management": [
+        "dependency detection",
+        "blocker identification",
+        "assignee allocation",
+        "resource allocation",
+        "role allocation",
+        "capability matching",
+    ],
+    "Sprint & Project Monitoring": [
+        "sprint planning",
+        "progress tracking",
+        "issue tracking",
+        "status reporting",
+    ],
+    "Agile Collaboration Support": [
+        "meeting assistance",
+        "scrum support",
+        "daily scrum",
+        "retrospective support",
+        "collaboration assistance",
+    ],
+    "Decision Support & Risk Management": [
+        "risk prediction",
+        "recommendations",
+        "quality support",
+        "managerial or technical decision support",
+    ],
+    "Other / To be classified later": [
+        "not clearly classifiable",
+        "insufficient information",
+        "outside Agile software project management",
+    ],
+}
+
+
 class ClassificationResult(BaseModel):
     category: Literal[
         "User Story Management",
@@ -65,62 +126,64 @@ class ClassificationResult(BaseModel):
         "Other / To be classified later",
     ]
 
-    subcategories: list[Literal[
-        # User Story Management
-        "refinement",
-        "quality improvement",
-        "prioritization of user stories",
+    subcategories: list[
+        Literal[
+            # User Story Management
+            "refinement",
+            "quality improvement",
+            "prioritization of user stories",
 
-        # Backlog Management
-        "backlog grooming",
-        "backlog organization",
-        "backlog prioritization",
+            # Backlog Management
+            "backlog grooming",
+            "backlog organization",
+            "backlog prioritization",
 
-        # Estimation
-        "user story estimation",
-        "story point estimation",
-        "effort estimation",
-        "task effort/time estimation",
-        "complexity estimation",
+            # Estimation
+            "user story estimation",
+            "story point estimation",
+            "effort estimation",
+            "task effort/time estimation",
+            "complexity estimation",
 
-        # Task Management
-        "task decomposition",
-        "task planning",
-        "task scheduling",
-        "task prioritization",
+            # Task Management
+            "task decomposition",
+            "task planning",
+            "task scheduling",
+            "task prioritization",
 
-        # Dependency & Resource Management
-        "dependency detection",
-        "blocker identification",
-        "assignee allocation",
-        "resource allocation",
-        "role allocation",
-        "capability matching",
+            # Dependency & Resource Management
+            "dependency detection",
+            "blocker identification",
+            "assignee allocation",
+            "resource allocation",
+            "role allocation",
+            "capability matching",
 
-        # Sprint & Project Monitoring
-        "sprint planning",
-        "progress tracking",
-        "issue tracking",
-        "status reporting",
+            # Sprint & Project Monitoring
+            "sprint planning",
+            "progress tracking",
+            "issue tracking",
+            "status reporting",
 
-        # Agile Collaboration Support
-        "meeting assistance",
-        "scrum support",
-        "daily scrum",
-        "retrospective support",
-        "collaboration assistance",
+            # Agile Collaboration Support
+            "meeting assistance",
+            "scrum support",
+            "daily scrum",
+            "retrospective support",
+            "collaboration assistance",
 
-        # Decision Support & Risk Management
-        "risk prediction",
-        "recommendations",
-        "quality support",
-        "managerial or technical decision support",
+            # Decision Support & Risk Management
+            "risk prediction",
+            "recommendations",
+            "quality support",
+            "managerial or technical decision support",
 
-        # Other
-        "not clearly classifiable",
-        "insufficient information",
-        "outside Agile software project management",
-    ]]
+            # Other
+            "not clearly classifiable",
+            "insufficient information",
+            "outside Agile software project management",
+        ]
+    ]
 
     confidence: Literal["High", "Medium", "Low"]
     reason: str
@@ -221,8 +284,41 @@ Important rules:
 
 
 # -----------------------------
-# Functions
+# Helper functions
 # -----------------------------
+def clean_cell(value) -> str:
+    value = str(value).strip()
+
+    if value.lower() == "nan":
+        return ""
+
+    return value
+
+
+def clean_subcategories(result: ClassificationResult) -> ClassificationResult:
+    """
+    Ensures that all returned subcategories belong to the selected main category.
+    If the model returns a subcategory from another category, it is removed.
+    """
+
+    allowed_subcategories = ALLOWED_SUBCATEGORIES_BY_CATEGORY[result.category]
+
+    cleaned_subcategories = [
+        subcategory
+        for subcategory in result.subcategories
+        if subcategory in allowed_subcategories
+    ]
+
+    if not cleaned_subcategories:
+        if result.category == "Other / To be classified later":
+            cleaned_subcategories = ["insufficient information"]
+        else:
+            cleaned_subcategories = [allowed_subcategories[0]]
+
+    result.subcategories = cleaned_subcategories
+    return result
+
+
 def classify_text(title: str, text: str) -> ClassificationResult:
     user_prompt = f"""
 Source title:
@@ -243,7 +339,10 @@ Classify this source according to the taxonomy.
         text_format=ClassificationResult,
     )
 
-    return response.output_parsed
+    result = response.output_parsed
+    result = clean_subcategories(result)
+
+    return result
 
 
 def extract_text_from_url(url: str) -> str:
@@ -255,7 +354,7 @@ def extract_text_from_url(url: str) -> str:
     extracted = trafilatura.extract(
         downloaded,
         include_comments=False,
-        include_tables=False
+        include_tables=False,
     )
 
     return extracted or ""
@@ -277,15 +376,6 @@ def dataframe_to_excel_bytes(df: pd.DataFrame) -> bytes:
         df.to_excel(writer, index=False, sheet_name="classification_results")
 
     return output.getvalue()
-
-
-def clean_cell(value) -> str:
-    value = str(value).strip()
-
-    if value.lower() == "nan":
-        return ""
-
-    return value
 
 
 # -----------------------------
@@ -322,7 +412,7 @@ elif mode == "Grey Literature: URL":
 
     manual_text = st.text_area(
         "Optional: Paste webpage text manually if URL extraction fails or if you want to classify a selected part of the page",
-        height=220
+        height=220,
     )
 
     if st.button("Read URL and Classify"):
@@ -330,19 +420,22 @@ elif mode == "Grey Literature: URL":
             st.warning("Please enter a URL or paste the webpage text manually.")
         else:
             with st.spinner("Preparing text..."):
-
                 if manual_text.strip():
                     text = manual_text.strip()
                     source_title = url if url.strip() else "Manually pasted grey literature text"
+                    text_source_used = "manual_text"
                     st.info("Using manually pasted text.")
                 else:
                     text = extract_text_from_url(url)
                     source_title = url
+                    text_source_used = "url"
 
             if not text:
-                st.error("Could not extract readable text from this URL. Please paste the webpage text manually.")
+                st.error(
+                    "Could not extract readable text from this URL. Please paste the webpage text manually."
+                )
             else:
-                st.success("Text is ready for classification.")
+                st.success(f"Text is ready for classification. Source used: {text_source_used}")
 
                 with st.expander("Preview text used for classification"):
                     st.write(text[:3000])
@@ -370,8 +463,20 @@ elif mode == "Batch: Excel/CSV":
 
         st.info(
             "Recommended columns: source_id, source_type, title, abstract, url. "
-            "For papers, use title + abstract. For grey literature, use abstract if you prepared a reliable manual summary; otherwise use url."
+            "If abstract is available, the app will use abstract first. "
+            "If abstract is empty, it will try to extract text from the URL."
         )
+
+        required_columns = {"source_id", "source_type", "title", "abstract", "url"}
+        available_columns = set(df.columns)
+
+        missing_columns = required_columns - available_columns
+        if missing_columns:
+            st.warning(
+                "Some recommended columns are missing: "
+                + ", ".join(sorted(missing_columns))
+                + ". The app can still run, but results may be less complete."
+            )
 
         if st.button("Classify all rows"):
             results = []
@@ -387,8 +492,9 @@ elif mode == "Batch: Excel/CSV":
                 url = clean_cell(row.get("url", ""))
 
                 # Important logic:
-                # If abstract exists, use it first.
-                # If abstract is empty and url exists, extract from url.
+                # 1. If abstract exists, use abstract first.
+                # 2. If abstract is empty and url exists, extract text from url.
+                # 3. If neither exists, classify as insufficient information.
                 if abstract:
                     text = abstract
                     source_title = title if title else source_id if source_id else "Untitled source"
@@ -403,20 +509,22 @@ elif mode == "Batch: Excel/CSV":
                     text_source_used = "none"
 
                 if not text:
-                    results.append({
-                        "source_id": source_id,
-                        "source_type": source_type,
-                        "title": title,
-                        "url": url,
-                        "text_source_used": text_source_used,
-                        "predicted_category": "Other / To be classified later",
-                        "predicted_subcategories": "insufficient information",
-                        "confidence": "Low",
-                        "reason": "No usable text was available.",
-                        "evidence": "",
-                        "human_decision": "",
-                        "notes": "",
-                    })
+                    results.append(
+                        {
+                            "source_id": source_id,
+                            "source_type": source_type,
+                            "title": title,
+                            "url": url,
+                            "text_source_used": text_source_used,
+                            "predicted_category": "Other / To be classified later",
+                            "predicted_subcategories": "insufficient information",
+                            "confidence": "Low",
+                            "reason": "No usable text was available.",
+                            "evidence": "",
+                            "human_decision": "",
+                            "notes": "",
+                        }
+                    )
 
                     progress_bar.progress(row_number / total_rows)
                     continue
@@ -424,36 +532,40 @@ elif mode == "Batch: Excel/CSV":
                 try:
                     result = classify_text(source_title, text)
 
-                    results.append({
-                        "source_id": source_id,
-                        "source_type": source_type,
-                        "title": title,
-                        "url": url,
-                        "text_source_used": text_source_used,
-                        "predicted_category": result.category,
-                        "predicted_subcategories": ", ".join(result.subcategories),
-                        "confidence": result.confidence,
-                        "reason": result.reason,
-                        "evidence": result.evidence,
-                        "human_decision": "",
-                        "notes": "",
-                    })
+                    results.append(
+                        {
+                            "source_id": source_id,
+                            "source_type": source_type,
+                            "title": title,
+                            "url": url,
+                            "text_source_used": text_source_used,
+                            "predicted_category": result.category,
+                            "predicted_subcategories": ", ".join(result.subcategories),
+                            "confidence": result.confidence,
+                            "reason": result.reason,
+                            "evidence": result.evidence,
+                            "human_decision": "",
+                            "notes": "",
+                        }
+                    )
 
                 except Exception as e:
-                    results.append({
-                        "source_id": source_id,
-                        "source_type": source_type,
-                        "title": title,
-                        "url": url,
-                        "text_source_used": text_source_used,
-                        "predicted_category": "Other / To be classified later",
-                        "predicted_subcategories": "insufficient information",
-                        "confidence": "Low",
-                        "reason": f"Classification failed: {e}",
-                        "evidence": "",
-                        "human_decision": "",
-                        "notes": "",
-                    })
+                    results.append(
+                        {
+                            "source_id": source_id,
+                            "source_type": source_type,
+                            "title": title,
+                            "url": url,
+                            "text_source_used": text_source_used,
+                            "predicted_category": "Other / To be classified later",
+                            "predicted_subcategories": "insufficient information",
+                            "confidence": "Low",
+                            "reason": f"Classification failed: {e}",
+                            "evidence": "",
+                            "human_decision": "",
+                            "notes": "",
+                        }
+                    )
 
                 progress_bar.progress(row_number / total_rows)
 
