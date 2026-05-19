@@ -18,8 +18,11 @@ from pydantic import BaseModel
 # -----------------------------
 st.set_page_config(page_title="Agile PM Source Classifier", layout="wide")
 
-st.title("Agile Project Management Source Classifier")
-st.write("Classify papers and grey literature into Agile Project Management categories.")
+st.title("Agile Activity Mapper for LLM-Based Multi-Agent Systems")
+st.write(
+    "Map papers and grey literature on LLM-based multi-agent systems "
+    "to Agile project management activity categories for gap analysis."
+)
 
 
 # -----------------------------
